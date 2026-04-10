@@ -3,10 +3,11 @@ param(
 	[string]$ChatVsix,
 	[string]$CopilotVsix,
 	[string]$CodiumBin,
-	[string]$CodeVersion,
+	[string]$CodeVersion = $env:VSCODIUM_CODE_VERSION,
 	[string]$UserDataDir = $env:VSCODIUM_USER_DATA_DIR,
 	[string]$ExtensionsDir = $env:VSCODIUM_EXTENSIONS_DIR,
 	[switch]$Uninstall,
+	[switch]$WithCopilot,
 	[switch]$IncludeCopilot,
 	[switch]$SkipInstall,
 	[switch]$DownloadLatest,
@@ -36,6 +37,10 @@ $script:RequiredProposals = @(
 	'chatSessionsProvider'
 )
 
+if ($CopilotVsix) {
+	$WithCopilot = $true
+}
+
 function Write-Info {
 	param([string]$Message)
 	Write-Host "[info] $Message"
@@ -61,6 +66,7 @@ When no local VSIX is found, the installer downloads the newest marketplace buil
 
 Common options:
   -ChatVsix PATH
+	-WithCopilot
   -CopilotVsix PATH
 	-CodeVersion VER
 	-DownloadLatest
@@ -868,6 +874,10 @@ try {
 		Fail '-IncludeCopilot can only be used with -Uninstall.'
 	}
 
+	if ($WithCopilot -and $Uninstall) {
+		Fail '-WithCopilot and -CopilotVsix are install options. Use -IncludeCopilot with -Uninstall.'
+	}
+
 	if ($DownloadLatest -and $Uninstall) {
 		Fail '-DownloadLatest cannot be used with -Uninstall.'
 	}
@@ -889,7 +899,9 @@ try {
 	}
 
 	if (-not $SkipInstall -and -not $DownloadLatest -and -not $CopilotVsix) {
-		$CopilotVsix = Find-VsixByExtensionId -ExtensionId 'github.copilot'
+		if ($WithCopilot) {
+			$CopilotVsix = Find-VsixByExtensionId -ExtensionId 'github.copilot'
+		}
 	}
 
 	if (-not $SkipInstall -and -not $ChatVsix) {
@@ -897,7 +909,9 @@ try {
 	}
 
 	if (-not $SkipInstall -and -not $CopilotVsix) {
-		$CopilotVsix = Download-MarketplaceVsix -ExtensionId 'GitHub.copilot'
+		if ($WithCopilot) {
+			$CopilotVsix = Download-MarketplaceVsix -ExtensionId 'GitHub.copilot'
+		}
 	}
 
 	if ($ChatVsix -and -not (Test-Path -LiteralPath $ChatVsix)) {
@@ -913,12 +927,16 @@ try {
 			Fail 'No Copilot Chat VSIX was found or downloaded. Pass -ChatVsix, keep a local VSIX nearby, or check marketplace connectivity.'
 		}
 
-		if (-not $CopilotVsix) {
+		if ($WithCopilot -and -not $CopilotVsix) {
 			Fail 'No GitHub Copilot VSIX was found or downloaded. Pass -CopilotVsix, keep a local VSIX nearby, or check marketplace connectivity.'
 		}
 
-		Write-Info 'Install requested. The script will install GitHub Copilot and Copilot Chat, patch installed manifests, verify them, and clear caches.'
-		Install-Vsix -VsixPath $CopilotVsix
+		if ($WithCopilot) {
+			Write-Info 'Install requested. The script will install GitHub Copilot Chat and the deprecated base GitHub Copilot extension, patch installed manifests, verify them, and clear caches.'
+			Install-Vsix -VsixPath $CopilotVsix
+		} else {
+			Write-Info 'Install requested. The script will install GitHub Copilot Chat, patch installed manifests, verify them, and clear caches.'
+		}
 		Install-Vsix -VsixPath $ChatVsix
 	}
 

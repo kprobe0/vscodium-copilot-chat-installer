@@ -31,6 +31,7 @@ jobs:
           USER_DATA_DIR="$RUNNER_TEMP/vscodium-user-data"
           EXTENSIONS_DIR="$RUNNER_TEMP/vscodium-extensions"
           TARGET_CODE_VERSION="1.112.01907"
+          export VSCODIUM_CODE_VERSION="$TARGET_CODE_VERSION"
           chmod +x scripts/install_vscodium_copilot_chat.sh
           scripts/install_vscodium_copilot_chat.sh \
             --download-latest \
@@ -146,10 +147,7 @@ jobs:
           }
 
           extensions_dir = pathlib.Path(os.environ['EXTENSIONS_DIR'])
-          copilot_dirs = sorted(path for path in extensions_dir.glob('github.copilot-*') if path.is_dir())
           chat_dirs = sorted(path for path in extensions_dir.glob('github.copilot-chat-*') if path.is_dir())
-          if not copilot_dirs:
-              raise SystemExit('Expected a github.copilot-* directory after Bash install')
           if not chat_dirs:
               raise SystemExit('Expected a github.copilot-chat-* directory after Bash install')
 
@@ -158,9 +156,9 @@ jobs:
           if not isinstance(proposals, list):
               raise SystemExit('enabledApiProposals is missing or invalid after Bash install')
 
-            target = parse_version(os.environ['TARGET_CODE_VERSION'])
-            engine_range = manifest.get('engines', {}).get('vscode', '')
-            if not compatible(engine_range, target):
+          target = parse_version(os.environ['TARGET_CODE_VERSION'])
+          engine_range = manifest.get('engines', {}).get('vscode', '')
+          if not compatible(engine_range, target):
               raise SystemExit(f'Installed Bash Copilot Chat build is not compatible with target Code version: {engine_range}')
 
           remaining = [item for item in proposals if isinstance(item, str) and re.search(r'@\d+$', item)]
@@ -177,7 +175,7 @@ jobs:
               for entry in registry
               if isinstance(entry, dict)
           }
-          expected_ids = {'github.copilot', 'github.copilot-chat'}
+          expected_ids = {'github.copilot-chat'}
           if not expected_ids.issubset(installed_ids):
               raise SystemExit(f'extensions.json is missing expected IDs after Bash install: {sorted(expected_ids - installed_ids)}')
           PY
@@ -229,11 +227,14 @@ jobs:
           $env:USER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumUserData'
           $env:EXTENSIONS_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumExtensions'
           $env:TARGET_CODE_VERSION = '1.112.01907'
-          & .\scripts\install_vscodium_copilot_chat.ps1 \
-            -DownloadLatest \
-            -CodeVersion $env:TARGET_CODE_VERSION \
-            -UserDataDir $env:USER_DATA_DIR \
-            -ExtensionsDir $env:EXTENSIONS_DIR
+          $env:VSCODIUM_CODE_VERSION = $env:TARGET_CODE_VERSION
+          $installerArgs = @{
+            DownloadLatest = $true
+            CodeVersion = $env:TARGET_CODE_VERSION
+            UserDataDir = $env:USER_DATA_DIR
+            ExtensionsDir = $env:EXTENSIONS_DIR
+          }
+          & .\scripts\install_vscodium_copilot_chat.ps1 @installerArgs
 
       - name: Verify PowerShell install results
         run: |
@@ -386,12 +387,7 @@ jobs:
             'chatSessionsProvider'
           )
 
-          $copilotDirs = @(Get-ChildItem -LiteralPath $env:EXTENSIONS_DIR -Directory -ErrorAction Stop | Where-Object { $_.Name -like 'github.copilot-*' })
           $chatDirs = @(Get-ChildItem -LiteralPath $env:EXTENSIONS_DIR -Directory -ErrorAction Stop | Where-Object { $_.Name -like 'github.copilot-chat-*' })
-
-          if (-not $copilotDirs) {
-            throw 'Expected a github.copilot-* directory after PowerShell install'
-          }
 
           if (-not $chatDirs) {
             throw 'Expected a github.copilot-chat-* directory after PowerShell install'
@@ -425,7 +421,7 @@ jobs:
           $entries = @(Get-Content -LiteralPath $registryPath -Raw | ConvertFrom-Json -Depth 50)
           $installedIds = @($entries | ForEach-Object { $_.identifier.id })
 
-          foreach ($expectedId in @('github.copilot', 'github.copilot-chat')) {
+          foreach ($expectedId in @('github.copilot-chat')) {
             if ($installedIds -notcontains $expectedId) {
               throw "extensions.json is missing expected ID after PowerShell install: $expectedId"
             }

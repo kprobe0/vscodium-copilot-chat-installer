@@ -9,6 +9,7 @@ dry_run=0
 allow_running=0
 skip_install=0
 uninstall_mode=0
+install_copilot=0
 include_copilot=0
 download_latest=0
 chat_vsix=""
@@ -34,6 +35,15 @@ required_proposals=(
 	chatSessionsProvider
 )
 required_proposals_csv="$(IFS=,; printf '%s' "${required_proposals[*]}")"
+ui_reset=""
+ui_bold=""
+ui_dim=""
+ui_blue=""
+ui_cyan=""
+ui_green=""
+ui_yellow=""
+ui_red=""
+ui_gray=""
 
 cleanup_download_root() {
 	if [[ $download_root_created -eq 1 && -n "$download_root" && -d "$download_root" ]]; then
@@ -43,16 +53,68 @@ cleanup_download_root() {
 
 trap cleanup_download_root EXIT
 
+supports_color() {
+	[[ -t 1 ]] || return 1
+	[[ -z "${NO_COLOR:-}" ]] || return 1
+	case "${TERM:-}" in
+		""|dumb)
+			return 1
+			;;
+	esac
+	return 0
+}
+
+init_terminal_style() {
+	local colors=""
+
+	if ! supports_color; then
+		return 0
+	fi
+
+	if command -v tput >/dev/null 2>&1; then
+		colors="$(tput colors 2>/dev/null || printf '0')"
+		if [[ "$colors" =~ ^[0-9]+$ ]] && (( colors >= 8 )); then
+			ui_reset="$(tput sgr0)"
+			ui_bold="$(tput bold)"
+			ui_dim="$(tput dim 2>/dev/null || printf '')"
+			ui_blue="$(tput setaf 4)"
+			ui_cyan="$(tput setaf 6)"
+			ui_green="$(tput setaf 2)"
+			ui_yellow="$(tput setaf 3)"
+			ui_red="$(tput setaf 1)"
+			ui_gray="$(tput setaf 7)"
+			return 0
+		fi
+	fi
+
+	ui_reset=$'\033[0m'
+	ui_bold=$'\033[1m'
+	ui_dim=$'\033[2m'
+	ui_blue=$'\033[34m'
+	ui_cyan=$'\033[36m'
+	ui_green=$'\033[32m'
+	ui_yellow=$'\033[33m'
+	ui_red=$'\033[31m'
+	ui_gray=$'\033[37m'
+}
+
+print_menu_option() {
+	local number="$1"
+	local color="$2"
+	local label="$3"
+	printf '  %s%s)%s %s\n' "$color" "$number" "$ui_reset" "$label"
+}
+
 log() {
-	printf '[info] %s\n' "$*"
+	printf '%s[info]%s %s\n' "$ui_cyan" "$ui_reset" "$*"
 }
 
 warn() {
-	printf '[warn] %s\n' "$*" >&2
+	printf '%s[warn]%s %s\n' "$ui_yellow" "$ui_reset" "$*" >&2
 }
 
 die() {
-	printf '[error] %s\n' "$*" >&2
+	printf '%s[error]%s %s\n' "$ui_red" "$ui_reset" "$*" >&2
 	exit 1
 }
 
@@ -69,9 +131,12 @@ Installs and patches GitHub Copilot Chat for VSCodium by:
 	4. Verifying core Copilot proposal names such as chatDebug and chatHooks are present after patching.
 	5. Clearing VSCodium extension caches so the next launch rescans the patched extension.
 
+By default, the Bash installer installs Copilot Chat only. The deprecated base GitHub Copilot extension is optional and must be requested explicitly.
+
 Options:
   --chat-vsix PATH       Use a specific Copilot Chat VSIX.
-  --copilot-vsix PATH    Optionally install a matching base GitHub Copilot VSIX.
+	--with-copilot        Also install the deprecated base GitHub Copilot extension.
+  --copilot-vsix PATH    Use a specific base GitHub Copilot VSIX and enable base install.
 	--download-latest      Skip local VSIX detection and download the newest compatible Copilot packages.
   --code-version VER     Override the target VSCodium version for marketplace compatibility checks.
   --codium-bin PATH      Path to the VSCodium CLI binary.
@@ -89,53 +154,102 @@ EOF
 confirm_prompt() {
 	local prompt="$1"
 	local response
-	read -r -p "$prompt [y/N]: " response
+	printf '%s%s [y/N]: %s' "$ui_bold$ui_cyan" "$prompt" "$ui_reset"
+	read -r response
 	[[ "$response" =~ ^([Yy]|[Yy][Ee][Ss])$ ]]
 }
 
 show_interactive_menu() {
 	local selection
+	local target_code_version=""
+	local local_chat_vsix=""
+	local local_copilot_vsix=""
 
 	if [[ $original_arg_count -ne 0 || ! -t 0 || ! -t 1 ]]; then
 		return
 	fi
 
+	if target_code_version="$(resolve_target_code_version 2>/dev/null)"; then
+		:
+	else
+		target_code_version="unknown"
+	fi
+
+	if local_chat_vsix="$(detect_vsix_for_extension 'github.copilot-chat' 2>/dev/null)"; then
+		:
+	else
+		local_chat_vsix=""
+	fi
+
+	if local_copilot_vsix="$(detect_vsix_for_extension 'github.copilot' 2>/dev/null)"; then
+		:
+	else
+		local_copilot_vsix=""
+	fi
+
 	while true; do
-		printf '\nVSCodium Copilot Chat\n'
-		printf '  1) Install and patch\n'
-		printf '  2) Patch existing install\n'
-		printf '  3) Uninstall Copilot Chat\n'
-		printf '  4) Uninstall Copilot Chat and GitHub Copilot\n'
-		printf '  5) Dry-run install and patch\n'
-		printf '  6) Show help\n'
-		printf '  7) Exit\n\n'
-		read -r -p 'Choose an option [1-7]: ' selection
+		printf '\n%s%sVSCodium Copilot Chat%s\n' "$ui_blue" "$ui_bold" "$ui_reset"
+		printf '  %sTarget Code version:%s %s\n' "$ui_dim" "$ui_reset" "$target_code_version"
+		printf '  %sDefault install:%s newest compatible Copilot Chat from the marketplace\n' "$ui_dim" "$ui_reset"
+		printf '  %sBase GitHub Copilot:%s optional and deprecated\n' "$ui_dim" "$ui_reset"
+		if [[ -n "$local_chat_vsix" ]]; then
+			printf '  %sLocal Chat VSIX:%s %s\n' "$ui_dim" "$ui_reset" "$(basename -- "$local_chat_vsix")"
+		fi
+		if [[ -n "$local_copilot_vsix" ]]; then
+			printf '  %sLocal Copilot VSIX:%s %s\n' "$ui_dim" "$ui_reset" "$(basename -- "$local_copilot_vsix")"
+		fi
+		printf '  %s----------------------------------------%s\n' "$ui_gray" "$ui_reset"
+		print_menu_option 1 "$ui_green$ui_bold" 'Install latest compatible Copilot Chat (recommended)'
+		print_menu_option 2 "$ui_yellow" 'Install latest compatible Copilot Chat + deprecated GitHub Copilot'
+		print_menu_option 3 "$ui_cyan" 'Install Copilot Chat using local VSIX detection'
+		print_menu_option 4 "$ui_cyan" 'Patch existing install'
+		print_menu_option 5 "$ui_red" 'Uninstall Copilot Chat'
+		print_menu_option 6 "$ui_red" 'Uninstall Copilot Chat and GitHub Copilot'
+		print_menu_option 7 "$ui_blue" 'Dry-run latest compatible Copilot Chat'
+		print_menu_option 8 "$ui_blue" 'Show help'
+		print_menu_option 9 "$ui_gray" 'Exit'
+		printf '\n%sChoose an option [1-9]: %s' "$ui_bold$ui_cyan" "$ui_reset"
+		read -r selection
 
 		case "$selection" in
 			1)
+				download_latest=1
 				break
 				;;
 			2)
-				skip_install=1
+				download_latest=1
+				install_copilot=1
 				break
 				;;
 			3)
-				uninstall_mode=1
+				if [[ -z "$local_chat_vsix" ]]; then
+					warn 'No local Copilot Chat VSIX was detected. Use option 1 to download the newest compatible build.'
+					continue
+				fi
 				break
 				;;
 			4)
+				skip_install=1
+				break
+				;;
+			5)
+				uninstall_mode=1
+				break
+				;;
+			6)
 				uninstall_mode=1
 				include_copilot=1
 				break
 				;;
-			5)
+			7)
+				download_latest=1
 				dry_run=1
 				break
 				;;
-			6)
+			8)
 				usage
 				;;
-			7|q|Q|exit)
+			9|q|Q|exit)
 				log "Cancelled."
 				exit 0
 				;;
@@ -595,8 +709,13 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--copilot-vsix)
 			[[ $# -ge 2 ]] || die "--copilot-vsix requires a path"
+			install_copilot=1
 			copilot_vsix="$2"
 			shift 2
+			;;
+		--with-copilot)
+			install_copilot=1
+			shift
 			;;
 		--codium-bin)
 			[[ $# -ge 2 ]] || die "--codium-bin requires a path"
@@ -652,7 +771,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-show_interactive_menu
+init_terminal_style
 
 if [[ $uninstall_mode -eq 1 && $skip_install -eq 1 ]]; then
 	die "Use either --uninstall or --skip-install, not both."
@@ -664,6 +783,10 @@ fi
 
 if [[ $include_copilot -eq 1 && $uninstall_mode -eq 0 ]]; then
 	die "--include-copilot can only be used with --uninstall."
+fi
+
+if [[ $install_copilot -eq 1 && $uninstall_mode -eq 1 ]]; then
+	die "--with-copilot and --copilot-vsix are install options. Use --include-copilot with --uninstall."
 fi
 
 if [[ $download_latest -eq 1 && $uninstall_mode -eq 1 ]]; then
@@ -694,6 +817,8 @@ if [[ -z "$codium_bin" ]]; then
 	fi
 fi
 
+show_interactive_menu
+
 if [[ $dry_run -eq 0 && $allow_running -eq 0 ]] && is_vscodium_running; then
 	die "Close all VSCodium windows before running this installer, or pass --allow-running."
 fi
@@ -714,7 +839,7 @@ if [[ $skip_install -eq 0 && $download_latest -eq 0 && -z "$chat_vsix" ]]; then
 	fi
 fi
 
-if [[ $skip_install -eq 0 && $download_latest -eq 0 && -z "$copilot_vsix" ]]; then
+if [[ $install_copilot -eq 1 && $skip_install -eq 0 && $download_latest -eq 0 && -z "$copilot_vsix" ]]; then
 	if detected_copilot_vsix="$(detect_vsix_for_extension 'github.copilot' 2>/dev/null)"; then
 		copilot_vsix="$detected_copilot_vsix"
 	fi
@@ -724,7 +849,7 @@ if [[ $skip_install -eq 0 && -z "$chat_vsix" ]]; then
 	download_marketplace_vsix 'GitHub.copilot-chat' chat_vsix
 fi
 
-if [[ $skip_install -eq 0 && -z "$copilot_vsix" ]]; then
+if [[ $install_copilot -eq 1 && $skip_install -eq 0 && -z "$copilot_vsix" ]]; then
 	download_marketplace_vsix 'GitHub.copilot' copilot_vsix
 fi
 
@@ -738,9 +863,13 @@ fi
 
 if [[ $skip_install -eq 0 ]]; then
 	[[ -n "$chat_vsix" ]] || die "No Copilot Chat VSIX was found or downloaded. Pass --chat-vsix, keep a local VSIX nearby, or check marketplace connectivity."
-	[[ -n "$copilot_vsix" ]] || die "No GitHub Copilot VSIX was found or downloaded. Pass --copilot-vsix, keep a local VSIX nearby, or check marketplace connectivity."
-	log "Install requested. The script will install GitHub Copilot and Copilot Chat, patch installed manifests, verify them, and clear caches."
-	install_vsix "$copilot_vsix"
+	if [[ $install_copilot -eq 1 ]]; then
+		[[ -n "$copilot_vsix" ]] || die "No GitHub Copilot VSIX was found or downloaded. Pass --copilot-vsix, keep a local VSIX nearby, or check marketplace connectivity."
+		log "Install requested. The script will install GitHub Copilot Chat and the deprecated base GitHub Copilot extension, patch installed manifests, verify them, and clear caches."
+		install_vsix "$copilot_vsix"
+	else
+		log "Install requested. The script will install GitHub Copilot Chat, patch installed manifests, verify them, and clear caches."
+	fi
 	install_vsix "$chat_vsix"
 fi
 
