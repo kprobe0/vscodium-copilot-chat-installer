@@ -631,7 +631,7 @@ function Update-ExtensionsRegistry {
 	}
 
 	$entries += [pscustomobject]$entry
-	$entries | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $registryPath -Encoding utf8
+	ConvertTo-Json -InputObject @($entries) -Depth 20 | Set-Content -LiteralPath $registryPath -Encoding utf8
 }
 
 function Remove-ExtensionsRegistryEntries {
@@ -660,7 +660,7 @@ function Remove-ExtensionsRegistryEntries {
 	}
 
 	if ($removedCount -gt 0) {
-		$kept | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $registryPath -Encoding utf8
+		ConvertTo-Json -InputObject @($kept) -Depth 20 | Set-Content -LiteralPath $registryPath -Encoding utf8
 		Write-Info "Updated $registryPath and removed $removedCount registry entries"
 	} else {
 		Write-Info "Unchanged $registryPath"

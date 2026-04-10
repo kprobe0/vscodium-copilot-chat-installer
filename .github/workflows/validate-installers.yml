@@ -431,11 +431,13 @@ jobs:
         run: |
           $env:USER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumUserData'
           $env:EXTENSIONS_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumExtensions'
-          & .\scripts\install_vscodium_copilot_chat.ps1 \
-            -Uninstall \
-            -IncludeCopilot \
-            -UserDataDir $env:USER_DATA_DIR \
-            -ExtensionsDir $env:EXTENSIONS_DIR
+          $installerArgs = @{
+            Uninstall = $true
+            IncludeCopilot = $true
+            UserDataDir = $env:USER_DATA_DIR
+            ExtensionsDir = $env:EXTENSIONS_DIR
+          }
+          & .\scripts\install_vscodium_copilot_chat.ps1 @installerArgs
 
       - name: Verify PowerShell uninstall cleanup
         run: |
