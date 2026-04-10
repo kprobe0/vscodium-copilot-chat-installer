@@ -43,6 +43,29 @@ download_file() {
 	esac
 }
 
+run_installer() {
+	local installer_path="$1"
+	shift
+
+	if [[ $# -eq 0 ]]; then
+		if [[ -t 0 ]]; then
+			bash "$installer_path"
+			return $?
+		fi
+
+		if exec {tty_fd}</dev/tty 2>/dev/null; then
+			bash "$installer_path" <&"$tty_fd"
+			local status=$?
+			exec {tty_fd}<&-
+			return "$status"
+		fi
+
+		bootstrap_die 'Interactive mode requires a terminal. Re-run in a terminal or pass --download-latest for a direct install.'
+	fi
+
+	bash "$installer_path" "$@"
+}
+
 main() {
 	local source_path="${BASH_SOURCE[0]:-}"
 	local bootstrap_dir=""
@@ -57,14 +80,13 @@ main() {
 	fi
 
 	if [[ ${#args[@]} -eq 0 ]]; then
-		bootstrap_log "No arguments supplied. Running the recommended install path (--download-latest). Use --menu for the interactive installer."
-		args=(--download-latest)
+		bootstrap_log "No arguments supplied. Opening the interactive installer menu. Use --download-latest for the direct install path."
 	fi
 
 	if [[ -n "$source_path" ]] && bootstrap_dir="$(cd -- "$(dirname -- "$source_path")" 2>/dev/null && pwd)"; then
 		local_installer="$bootstrap_dir/scripts/install_vscodium_copilot_chat.sh"
 		if [[ -f "$local_installer" ]]; then
-			bash "$local_installer" "${args[@]}"
+			run_installer "$local_installer" "${args[@]}"
 			exit $?
 		fi
 	fi
@@ -77,7 +99,7 @@ main() {
 	bootstrap_log "Fetching installer from GitHub"
 	download_file "$fetcher" "$remote_installer_url" "$temp_dir/install_vscodium_copilot_chat.sh" || bootstrap_die "Failed to download installer from $remote_installer_url"
 	chmod +x "$temp_dir/install_vscodium_copilot_chat.sh"
-	bash "$temp_dir/install_vscodium_copilot_chat.sh" "${args[@]}"
+	run_installer "$temp_dir/install_vscodium_copilot_chat.sh" "${args[@]}"
 }
 
 main "$@"

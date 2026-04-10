@@ -1,52 +1,61 @@
 # VSCodium Copilot Chat Installer
 
-This repo installs GitHub Copilot Chat in VSCodium and patches the extension manifest so VSCodium will load it.
+> Install GitHub Copilot Chat in VSCodium and patch the extension manifest so VSCodium actually loads it.
 
 The main path is Bash on Linux and macOS. PowerShell is included for Windows, but the Bash flow is the most polished path.
 
-## Fastest Path
+## Quick Start
 
-Linux or macOS, recommended, copy and paste this:
+Linux or macOS, recommended:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash
 ```
 
-That installs Copilot Chat only and downloads the newest compatible build automatically.
+That opens the interactive installer menu first, which is the safest default for most users.
 
-If you also want the deprecated base GitHub Copilot extension:
+## Choose Your Path
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash -s -- --with-copilot
-```
+### Linux and macOS
+
+| What you want | Command |
+| --- | --- |
+| Open the interactive menu | `curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash` |
+| Direct install, Copilot Chat only | `curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash -s -- --download-latest` |
+| Direct install with deprecated base Copilot too | `curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash -s -- --download-latest --with-copilot` |
 
 If you prefer to clone the repo first:
 
 ```bash
 git clone https://github.com/kprobe0/vscodium-copilot-chat-installer.git
 cd vscodium-copilot-chat-installer
-./install.sh
 ```
 
-If you want the interactive menu instead of the fast path:
+Then use one of these:
 
-```bash
-./install.sh --menu
-```
+| What you want | Command |
+| --- | --- |
+| Open the interactive menu | `./install.sh` |
+| Direct install, Copilot Chat only | `./install.sh --download-latest` |
+| Direct install with deprecated base Copilot too | `./install.sh --download-latest --with-copilot` |
 
-## Windows
+### Windows
 
 Windows still uses the PowerShell entrypoint directly:
 
-```powershell
-.\scripts\install_vscodium_copilot_chat.ps1 -DownloadLatest
-```
+| What you want | Command |
+| --- | --- |
+| Direct install, Copilot Chat only | `./scripts/install_vscodium_copilot_chat.ps1 -DownloadLatest` |
+| Direct install with deprecated base Copilot too | `./scripts/install_vscodium_copilot_chat.ps1 -DownloadLatest -WithCopilot` |
 
-Or, if you also want the deprecated base extension:
+## Why This Exists
 
-```powershell
-.\scripts\install_vscodium_copilot_chat.ps1 -DownloadLatest -WithCopilot
-```
+VSCodium can install Copilot Chat, but the extension will not load cleanly unless its proposed API entries are normalized for the VSCodium build you are running.
+
+This repo handles the two annoying parts for you:
+
+- getting a compatible Copilot Chat build
+- patching the manifest so VSCodium will actually load it
 
 ## What The Scripts Do
 
@@ -60,17 +69,22 @@ Or, if you also want the deprecated base extension:
 - clear VSCodium extension cache files so the next full restart rescans the install
 - support patch-only, dry-run, and uninstall flows
 
-## Useful Commands
+## Common Commands
+
+### Bash
 
 ```bash
 ./install.sh
-./install.sh --with-copilot
 ./install.sh --menu
+./install.sh --download-latest
+./install.sh --download-latest --with-copilot
 ./scripts/install_vscodium_copilot_chat.sh --dry-run --download-latest
 ./scripts/install_vscodium_copilot_chat.sh --skip-install
 ./scripts/install_vscodium_copilot_chat.sh --uninstall
 ./scripts/install_vscodium_copilot_chat.sh --uninstall --include-copilot
 ```
+
+### PowerShell
 
 ```powershell
 .\scripts\install_vscodium_copilot_chat.ps1 -DownloadLatest
@@ -85,8 +99,10 @@ Or, if you also want the deprecated base extension:
 
 - `--download-latest` and `-DownloadLatest` mean newest compatible marketplace build, not newest upload.
 - The Bash menu defaults to Copilot Chat from the marketplace. Base Copilot is optional.
-- `./install.sh` is the beginner entrypoint. With no arguments it defaults to `--download-latest`.
+- `./install.sh` is the beginner entrypoint. With no arguments it opens the interactive menu.
+- The one-line `curl ... | bash` path also opens the interactive menu by default.
 - `--with-copilot` and `-WithCopilot` opt into the deprecated base GitHub Copilot extension.
+- Use `--download-latest` when you want a non-interactive install.
 - `--skip-install` and `-SkipInstall` only repatch an existing install.
 - `--uninstall` and `-Uninstall` remove Copilot Chat. Add `--include-copilot` or `-IncludeCopilot` to remove the base Copilot extension too.
 - `--code-version`, `-CodeVersion`, and `VSCODIUM_CODE_VERSION` are there for CI or for systems where `codium` is not available on `PATH`.
