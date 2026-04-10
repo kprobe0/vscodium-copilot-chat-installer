@@ -1,0 +1,460 @@
+name: Validate Installers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - scripts/**
+      - .github/workflows/validate-installers.yml
+      - README.md
+  pull_request:
+    paths:
+      - scripts/**
+      - .github/workflows/validate-installers.yml
+      - README.md
+
+jobs:
+  validate-bash-installer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Syntax check Bash installer
+        run: bash -n scripts/install_vscodium_copilot_chat.sh
+
+      - name: Run Bash installer against temp directories
+        run: |
+          USER_DATA_DIR="$RUNNER_TEMP/vscodium-user-data"
+          EXTENSIONS_DIR="$RUNNER_TEMP/vscodium-extensions"
+          TARGET_CODE_VERSION="1.112.01907"
+          chmod +x scripts/install_vscodium_copilot_chat.sh
+          scripts/install_vscodium_copilot_chat.sh \
+            --download-latest \
+            --code-version "$TARGET_CODE_VERSION" \
+            --user-data-dir "$USER_DATA_DIR" \
+            --extensions-dir "$EXTENSIONS_DIR"
+
+      - name: Verify Bash install results
+        run: |
+          USER_DATA_DIR="$RUNNER_TEMP/vscodium-user-data"
+          EXTENSIONS_DIR="$RUNNER_TEMP/vscodium-extensions"
+          TARGET_CODE_VERSION="1.112.01907"
+          export USER_DATA_DIR EXTENSIONS_DIR TARGET_CODE_VERSION
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+
+          def parse_version(text: str):
+            text = str(text).strip().lstrip('v')
+            parts = []
+            for raw in text.split('.'):
+              digits = ''.join(ch for ch in raw if ch.isdigit())
+              parts.append(int(digits or '0'))
+            while len(parts) < 3:
+              parts.append(0)
+            return tuple(parts[:3])
+
+          def upper_for_caret(base):
+            if base[0] != 0:
+              return (base[0] + 1, 0, 0)
+            if base[1] != 0:
+              return (0, base[1] + 1, 0)
+            return (0, 0, base[2] + 1)
+
+          def upper_for_tilde(base):
+            return (base[0], base[1] + 1, 0)
+
+          def wildcard_range(token):
+            token = token.strip()
+            if token in {'*', 'x', 'X'}:
+              return (0, 0, 0), None
+            parts = token.split('.')
+            normalized = []
+            wildcard_index = None
+            for index, part in enumerate(parts):
+              if part in {'*', 'x', 'X'}:
+                wildcard_index = index
+                break
+              normalized.append(int(''.join(ch for ch in part if ch.isdigit()) or '0'))
+            if wildcard_index is None:
+              return None
+            while len(normalized) < 3:
+              normalized.append(0)
+            lower = tuple(normalized[:3])
+            if wildcard_index == 0:
+              upper = None
+            elif wildcard_index == 1:
+              upper = (lower[0] + 1, 0, 0)
+            else:
+              upper = (lower[0], lower[1] + 1, 0)
+            return lower, upper
+
+          def satisfies_token(token, target):
+            token = token.strip()
+            if not token or token in {'*', 'x', 'X'}:
+              return True
+            if token.startswith('^'):
+              base = parse_version(token[1:])
+              return base <= target < upper_for_caret(base)
+            if token.startswith('~'):
+              base = parse_version(token[1:])
+              return base <= target < upper_for_tilde(base)
+            for prefix in ('>=', '<=', '>', '<', '='):
+              if token.startswith(prefix):
+                version = parse_version(token[len(prefix):])
+                if prefix == '>=':
+                  return target >= version
+                if prefix == '<=':
+                  return target <= version
+                if prefix == '>':
+                  return target > version
+                if prefix == '<':
+                  return target < version
+                return target == version
+            wildcard = wildcard_range(token)
+            if wildcard is not None:
+              lower, upper = wildcard
+              if upper is None:
+                return True
+              return lower <= target < upper
+            return target == parse_version(token)
+
+          def compatible(spec, target):
+            for group in str(spec).split('||'):
+              tokens = [token for token in group.replace(',', ' ').split() if token]
+              if all(satisfies_token(token, target) for token in tokens):
+                return True
+            return False
+
+          required = {
+              'chatDebug',
+              'chatHooks',
+              'languageModelToolSupportsModel',
+              'findFiles2',
+              'chatParticipantAdditions',
+              'defaultChatParticipant',
+              'aiTextSearchProvider',
+              'chatParticipantPrivate',
+              'chatProvider',
+              'chatSessionsProvider',
+          }
+
+          extensions_dir = pathlib.Path(os.environ['EXTENSIONS_DIR'])
+          copilot_dirs = sorted(path for path in extensions_dir.glob('github.copilot-*') if path.is_dir())
+          chat_dirs = sorted(path for path in extensions_dir.glob('github.copilot-chat-*') if path.is_dir())
+          if not copilot_dirs:
+              raise SystemExit('Expected a github.copilot-* directory after Bash install')
+          if not chat_dirs:
+              raise SystemExit('Expected a github.copilot-chat-* directory after Bash install')
+
+          manifest = json.loads((chat_dirs[-1] / 'package.json').read_text(encoding='utf-8'))
+          proposals = manifest.get('enabledApiProposals')
+          if not isinstance(proposals, list):
+              raise SystemExit('enabledApiProposals is missing or invalid after Bash install')
+
+            target = parse_version(os.environ['TARGET_CODE_VERSION'])
+            engine_range = manifest.get('engines', {}).get('vscode', '')
+            if not compatible(engine_range, target):
+              raise SystemExit(f'Installed Bash Copilot Chat build is not compatible with target Code version: {engine_range}')
+
+          remaining = [item for item in proposals if isinstance(item, str) and re.search(r'@\d+$', item)]
+          missing = sorted(item for item in required if item not in set(proposals))
+          if remaining:
+              raise SystemExit(f'Found version-pinned proposals after Bash install: {remaining}')
+          if missing:
+              raise SystemExit(f'Missing required proposals after Bash install: {missing}')
+
+          registry_path = extensions_dir / 'extensions.json'
+          registry = json.loads(registry_path.read_text(encoding='utf-8'))
+          installed_ids = {
+              entry.get('identifier', {}).get('id')
+              for entry in registry
+              if isinstance(entry, dict)
+          }
+          expected_ids = {'github.copilot', 'github.copilot-chat'}
+          if not expected_ids.issubset(installed_ids):
+              raise SystemExit(f'extensions.json is missing expected IDs after Bash install: {sorted(expected_ids - installed_ids)}')
+          PY
+
+      - name: Run Bash uninstall
+        run: |
+          USER_DATA_DIR="$RUNNER_TEMP/vscodium-user-data"
+          EXTENSIONS_DIR="$RUNNER_TEMP/vscodium-extensions"
+          scripts/install_vscodium_copilot_chat.sh \
+            --uninstall \
+            --include-copilot \
+            --user-data-dir "$USER_DATA_DIR" \
+            --extensions-dir "$EXTENSIONS_DIR"
+
+      - name: Verify Bash uninstall cleanup
+        run: |
+          EXTENSIONS_DIR="$RUNNER_TEMP/vscodium-extensions"
+          if compgen -G "$EXTENSIONS_DIR/github.copilot*" > /dev/null; then
+            echo "Copilot extension directories remain after Bash uninstall"
+            exit 1
+          fi
+
+          export EXTENSIONS_DIR
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          registry_path = pathlib.Path(os.environ['EXTENSIONS_DIR']) / 'extensions.json'
+          if not registry_path.exists():
+              raise SystemExit('Expected extensions.json to exist after Bash uninstall')
+
+          entries = json.loads(registry_path.read_text(encoding='utf-8'))
+          if entries:
+              raise SystemExit(f'Expected an empty extensions.json after Bash uninstall, found {entries!r}')
+          PY
+
+  validate-powershell-installer:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run PowerShell installer against temp directories
+        run: |
+          $env:USER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumUserData'
+          $env:EXTENSIONS_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumExtensions'
+          $env:TARGET_CODE_VERSION = '1.112.01907'
+          & .\scripts\install_vscodium_copilot_chat.ps1 \
+            -DownloadLatest \
+            -CodeVersion $env:TARGET_CODE_VERSION \
+            -UserDataDir $env:USER_DATA_DIR \
+            -ExtensionsDir $env:EXTENSIONS_DIR
+
+      - name: Verify PowerShell install results
+        run: |
+          $env:USER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumUserData'
+          $env:EXTENSIONS_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumExtensions'
+          $env:TARGET_CODE_VERSION = '1.112.01907'
+
+          function ConvertTo-NormalizedVersion {
+            param([string]$Text)
+
+            $parts = New-Object System.Collections.Generic.List[int]
+            foreach ($segment in ($Text.Trim().TrimStart('v') -split '\.')) {
+              if ($parts.Count -ge 3) {
+                break
+              }
+              $match = [regex]::Match($segment, '\d+')
+              if ($match.Success) {
+                $parts.Add([int]$match.Value)
+              } else {
+                $parts.Add(0)
+              }
+            }
+            while ($parts.Count -lt 3) {
+              $parts.Add(0)
+            }
+            return [version]::new($parts[0], $parts[1], $parts[2])
+          }
+
+          function Get-CaretUpperBound {
+            param([version]$BaseVersion)
+            if ($BaseVersion.Major -ne 0) {
+              return [version]::new($BaseVersion.Major + 1, 0, 0)
+            }
+            if ($BaseVersion.Minor -ne 0) {
+              return [version]::new(0, $BaseVersion.Minor + 1, 0)
+            }
+            return [version]::new(0, 0, $BaseVersion.Build + 1)
+          }
+
+          function Get-TildeUpperBound {
+            param([version]$BaseVersion)
+            return [version]::new($BaseVersion.Major, $BaseVersion.Minor + 1, 0)
+          }
+
+          function Get-WildcardRange {
+            param([string]$Token)
+
+            $trimmed = $Token.Trim()
+            if ($trimmed -in @('*', 'x', 'X')) {
+              return [pscustomobject]@{ Lower = [version]::new(0, 0, 0); Upper = $null }
+            }
+
+            $parts = $trimmed -split '\.'
+            $normalized = New-Object System.Collections.Generic.List[int]
+            $wildcardIndex = -1
+            for ($index = 0; $index -lt $parts.Length; $index++) {
+              $part = $parts[$index]
+              if ($part -in @('*', 'x', 'X')) {
+                $wildcardIndex = $index
+                break
+              }
+              $match = [regex]::Match($part, '\d+')
+              if ($match.Success) {
+                $normalized.Add([int]$match.Value)
+              } else {
+                $normalized.Add(0)
+              }
+            }
+
+            if ($wildcardIndex -lt 0) {
+              return $null
+            }
+
+            while ($normalized.Count -lt 3) {
+              $normalized.Add(0)
+            }
+
+            $lower = [version]::new($normalized[0], $normalized[1], $normalized[2])
+            $upper = $null
+            if ($wildcardIndex -eq 1) {
+              $upper = [version]::new($lower.Major + 1, 0, 0)
+            } elseif ($wildcardIndex -ge 2) {
+              $upper = [version]::new($lower.Major, $lower.Minor + 1, 0)
+            }
+            return [pscustomobject]@{ Lower = $lower; Upper = $upper }
+          }
+
+          function Test-VersionTokenCompatible {
+            param([string]$Token, [version]$TargetVersion)
+
+            $trimmed = $Token.Trim()
+            if (-not $trimmed -or $trimmed -in @('*', 'x', 'X')) {
+              return $true
+            }
+            if ($trimmed.StartsWith('^')) {
+              $baseVersion = ConvertTo-NormalizedVersion -Text $trimmed.Substring(1)
+              return $TargetVersion -ge $baseVersion -and $TargetVersion -lt (Get-CaretUpperBound -BaseVersion $baseVersion)
+            }
+            if ($trimmed.StartsWith('~')) {
+              $baseVersion = ConvertTo-NormalizedVersion -Text $trimmed.Substring(1)
+              return $TargetVersion -ge $baseVersion -and $TargetVersion -lt (Get-TildeUpperBound -BaseVersion $baseVersion)
+            }
+            foreach ($prefix in @('>=', '<=', '>', '<', '=')) {
+              if ($trimmed.StartsWith($prefix)) {
+                $comparisonVersion = ConvertTo-NormalizedVersion -Text $trimmed.Substring($prefix.Length)
+                switch ($prefix) {
+                  '>=' { return $TargetVersion -ge $comparisonVersion }
+                  '<=' { return $TargetVersion -le $comparisonVersion }
+                  '>' { return $TargetVersion -gt $comparisonVersion }
+                  '<' { return $TargetVersion -lt $comparisonVersion }
+                  default { return $TargetVersion -eq $comparisonVersion }
+                }
+              }
+            }
+            $wildcard = Get-WildcardRange -Token $trimmed
+            if ($wildcard) {
+              if (-not $wildcard.Upper) {
+                return $true
+              }
+              return $TargetVersion -ge $wildcard.Lower -and $TargetVersion -lt $wildcard.Upper
+            }
+            return $TargetVersion -eq (ConvertTo-NormalizedVersion -Text $trimmed)
+          }
+
+          function Test-VersionRangeCompatible {
+            param([string]$Range, [version]$TargetVersion)
+            foreach ($group in ($Range -split '\|\|')) {
+              $tokens = @(($group -replace ',', ' ') -split '\s+' | Where-Object { $_ })
+              if (-not $tokens) {
+                return $true
+              }
+              $matches = @($tokens | ForEach-Object { Test-VersionTokenCompatible -Token $_ -TargetVersion $TargetVersion })
+              if ($matches -notcontains $false) {
+                return $true
+              }
+            }
+            return $false
+          }
+
+          $required = @(
+            'chatDebug',
+            'chatHooks',
+            'languageModelToolSupportsModel',
+            'findFiles2',
+            'chatParticipantAdditions',
+            'defaultChatParticipant',
+            'aiTextSearchProvider',
+            'chatParticipantPrivate',
+            'chatProvider',
+            'chatSessionsProvider'
+          )
+
+          $copilotDirs = @(Get-ChildItem -LiteralPath $env:EXTENSIONS_DIR -Directory -ErrorAction Stop | Where-Object { $_.Name -like 'github.copilot-*' })
+          $chatDirs = @(Get-ChildItem -LiteralPath $env:EXTENSIONS_DIR -Directory -ErrorAction Stop | Where-Object { $_.Name -like 'github.copilot-chat-*' })
+
+          if (-not $copilotDirs) {
+            throw 'Expected a github.copilot-* directory after PowerShell install'
+          }
+
+          if (-not $chatDirs) {
+            throw 'Expected a github.copilot-chat-* directory after PowerShell install'
+          }
+
+          $manifestPath = Join-Path $chatDirs[-1].FullName 'package.json'
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -Depth 100
+          $proposals = @($manifest.enabledApiProposals)
+          $targetCodeVersion = ConvertTo-NormalizedVersion -Text $env:TARGET_CODE_VERSION
+
+          if (-not $proposals) {
+            throw 'enabledApiProposals is missing or empty after PowerShell install'
+          }
+
+          if (-not (Test-VersionRangeCompatible -Range ([string]$manifest.engines.vscode) -TargetVersion $targetCodeVersion)) {
+            throw "Installed PowerShell Copilot Chat build is not compatible with target Code version: $($manifest.engines.vscode)"
+          }
+
+          $remaining = @($proposals | Where-Object { $_ -is [string] -and $_ -match '@\d+$' })
+          $missing = @($required | Where-Object { $proposals -cnotcontains $_ })
+
+          if ($remaining.Count -gt 0) {
+            throw "Found version-pinned proposals after PowerShell install: $($remaining -join ', ')"
+          }
+
+          if ($missing.Count -gt 0) {
+            throw "Missing required proposals after PowerShell install: $($missing -join ', ')"
+          }
+
+          $registryPath = Join-Path $env:EXTENSIONS_DIR 'extensions.json'
+          $entries = @(Get-Content -LiteralPath $registryPath -Raw | ConvertFrom-Json -Depth 50)
+          $installedIds = @($entries | ForEach-Object { $_.identifier.id })
+
+          foreach ($expectedId in @('github.copilot', 'github.copilot-chat')) {
+            if ($installedIds -notcontains $expectedId) {
+              throw "extensions.json is missing expected ID after PowerShell install: $expectedId"
+            }
+          }
+
+      - name: Run PowerShell uninstall
+        run: |
+          $env:USER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumUserData'
+          $env:EXTENSIONS_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumExtensions'
+          & .\scripts\install_vscodium_copilot_chat.ps1 \
+            -Uninstall \
+            -IncludeCopilot \
+            -UserDataDir $env:USER_DATA_DIR \
+            -ExtensionsDir $env:EXTENSIONS_DIR
+
+      - name: Verify PowerShell uninstall cleanup
+        run: |
+          $env:EXTENSIONS_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumExtensions'
+          $remaining = @(Get-ChildItem -LiteralPath $env:EXTENSIONS_DIR -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'github.copilot*' })
+          if ($remaining.Count -gt 0) {
+            throw "Copilot extension directories remain after PowerShell uninstall: $($remaining.FullName -join ', ')"
+          }
+
+          $registryPath = Join-Path $env:EXTENSIONS_DIR 'extensions.json'
+          if (-not (Test-Path -LiteralPath $registryPath)) {
+            throw 'Expected extensions.json to exist after PowerShell uninstall'
+          }
+
+          $entries = @(Get-Content -LiteralPath $registryPath -Raw | ConvertFrom-Json -Depth 50)
+          if ($entries.Count -ne 0) {
+            throw "Expected an empty extensions.json after PowerShell uninstall, found $($entries.Count) entries"
+          }
