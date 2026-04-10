@@ -18,11 +18,23 @@ That opens the interactive installer menu first, which is the safest default for
 
 ### Linux and macOS
 
-| What you want | Command |
-| --- | --- |
-| Open the interactive menu | `curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash` |
-| Direct install, Copilot Chat only | `curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash -s -- --download-latest` |
-| Direct install with deprecated base Copilot too | `curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash -s -- --download-latest --with-copilot` |
+Open the interactive menu:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash
+```
+
+Direct install, Copilot Chat only:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash -s -- --download-latest
+```
+
+Direct install with deprecated base Copilot too:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kprobe0/vscodium-copilot-chat-installer/main/install.sh | bash -s -- --download-latest --with-copilot
+```
 
 If you prefer to clone the repo first:
 
@@ -33,20 +45,39 @@ cd vscodium-copilot-chat-installer
 
 Then use one of these:
 
-| What you want | Command |
-| --- | --- |
-| Open the interactive menu | `./install.sh` |
-| Direct install, Copilot Chat only | `./install.sh --download-latest` |
-| Direct install with deprecated base Copilot too | `./install.sh --download-latest --with-copilot` |
+Open the interactive menu:
+
+```bash
+./install.sh
+```
+
+Direct install, Copilot Chat only:
+
+```bash
+./install.sh --download-latest
+```
+
+Direct install with deprecated base Copilot too:
+
+```bash
+./install.sh --download-latest --with-copilot
+```
 
 ### Windows
 
 Windows still uses the PowerShell entrypoint directly:
 
-| What you want | Command |
-| --- | --- |
-| Direct install, Copilot Chat only | `./scripts/install_vscodium_copilot_chat.ps1 -DownloadLatest` |
-| Direct install with deprecated base Copilot too | `./scripts/install_vscodium_copilot_chat.ps1 -DownloadLatest -WithCopilot` |
+Direct install, Copilot Chat only:
+
+```powershell
+.\scripts\install_vscodium_copilot_chat.ps1 -DownloadLatest
+```
+
+Direct install with deprecated base Copilot too:
+
+```powershell
+.\scripts\install_vscodium_copilot_chat.ps1 -DownloadLatest -WithCopilot
+```
 
 ## Why This Exists
 
