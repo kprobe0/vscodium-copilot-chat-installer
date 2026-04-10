@@ -7,11 +7,13 @@ on:
       - main
       - master
     paths:
+      - install.sh
       - scripts/**
       - .github/workflows/validate-installers.yml
       - README.md
   pull_request:
     paths:
+      - install.sh
       - scripts/**
       - .github/workflows/validate-installers.yml
       - README.md
@@ -23,8 +25,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Syntax check Bash installer
-        run: bash -n scripts/install_vscodium_copilot_chat.sh
+      - name: Syntax check Bash entrypoints
+        run: |
+          bash -n install.sh
+          bash -n scripts/install_vscodium_copilot_chat.sh
 
       - name: Run Bash installer against temp directories
         run: |
@@ -32,8 +36,8 @@ jobs:
           EXTENSIONS_DIR="$RUNNER_TEMP/vscodium-extensions"
           TARGET_CODE_VERSION="1.112.01907"
           export VSCODIUM_CODE_VERSION="$TARGET_CODE_VERSION"
-          chmod +x scripts/install_vscodium_copilot_chat.sh
-          scripts/install_vscodium_copilot_chat.sh \
+          chmod +x install.sh scripts/install_vscodium_copilot_chat.sh
+          ./install.sh \
             --download-latest \
             --code-version "$TARGET_CODE_VERSION" \
             --user-data-dir "$USER_DATA_DIR" \
