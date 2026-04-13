@@ -22,6 +22,7 @@ resolved_code_version=""
 user_data_dir="${VSCODIUM_USER_DATA_DIR:-}"
 extensions_dir="${VSCODIUM_EXTENSIONS_DIR:-}"
 codium_bin="${VSCODIUM_BIN:-}"
+# SYNC: keep in sync with $script:RequiredProposals in install_vscodium_copilot_chat.ps1 and the required sets in validate-installers.yml
 required_proposals=(
 	chatDebug
 	chatHooks
@@ -127,27 +128,27 @@ Run with no arguments in an interactive terminal to open a menu for install, pat
 Installs and patches GitHub Copilot Chat for VSCodium by:
 	1. Detecting local GitHub Copilot and Copilot Chat VSIX files, or downloading the newest marketplace builds compatible with the target VSCodium version.
 	2. Extracting the VSIX files directly into the VSCodium extensions directory.
-  3. Stripping version suffixes from enabledApiProposals in installed Copilot Chat manifests.
+	3. Stripping version suffixes from enabledApiProposals in installed Copilot Chat manifests.
 	4. Verifying core Copilot proposal names such as chatDebug and chatHooks are present after patching.
 	5. Clearing VSCodium extension caches so the next launch rescans the patched extension.
 
 By default, the Bash installer installs Copilot Chat only. The deprecated base GitHub Copilot extension is optional and must be requested explicitly.
 
 Options:
-  --chat-vsix PATH       Use a specific Copilot Chat VSIX.
-	--with-copilot        Also install the deprecated base GitHub Copilot extension.
-  --copilot-vsix PATH    Use a specific base GitHub Copilot VSIX and enable base install.
+	--chat-vsix PATH       Use a specific Copilot Chat VSIX.
+	--with-copilot         Also install the deprecated base GitHub Copilot extension.
+	--copilot-vsix PATH    Use a specific base GitHub Copilot VSIX and enable base install.
 	--download-latest      Skip local VSIX detection and download the newest compatible Copilot packages.
-  --code-version VER     Override the target VSCodium version for marketplace compatibility checks.
-  --codium-bin PATH      Path to the VSCodium CLI binary.
-  --user-data-dir PATH   Override the VSCodium user data directory.
-  --extensions-dir PATH  Override the VSCodium extensions directory.
+	--code-version VER     Override the target VSCodium version for marketplace compatibility checks.
+	--codium-bin PATH      Path to the VSCodium CLI binary.
+	--user-data-dir PATH   Override the VSCodium user data directory.
+	--extensions-dir PATH  Override the VSCodium extensions directory.
 	--uninstall            Remove installed GitHub Copilot Chat files and registry entries.
 	--include-copilot      With --uninstall, also remove the base GitHub Copilot extension.
-  --skip-install         Do not install a VSIX, only patch existing installed copies.
-  --allow-running        Do not stop if VSCodium is currently running.
-  --dry-run              Print actions without changing anything.
-  -h, --help             Show this help text.
+	--skip-install         Do not install a VSIX, only patch existing installed copies.
+	--allow-running        Do not stop if VSCodium is currently running.
+	--dry-run              Print actions without changing anything.
+	-h, --help             Show this help text.
 EOF
 }
 
@@ -288,14 +289,16 @@ run_cmd() {
 }
 
 require_python() {
-	if command -v python3 >/dev/null 2>&1; then
-		printf '%s\n' "$(command -v python3)"
-		return 0
-	fi
-	if command -v python >/dev/null 2>&1; then
-		printf '%s\n' "$(command -v python)"
-		return 0
-	fi
+	local candidate
+	for candidate in python3 python; do
+		if ! command -v "$candidate" >/dev/null 2>&1; then
+			continue
+		fi
+		if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info.major >= 3 else 1)' 2>/dev/null; then
+			printf '%s\n' "$(command -v "$candidate")"
+			return 0
+		fi
+	done
 	die "Python 3 is required for JSON patching."
 }
 
@@ -394,7 +397,7 @@ ensure_download_root() {
 download_marketplace_vsix() {
 	local extension_id="$1"
 	local result_var_name="$2"
-	local download_target_root payload metadata_json parse_script result version asset_url target_path engine_spec target_code_version
+	local download_target_root payload metadata_json result version asset_url target_path engine_spec target_code_version
 	local -a result_lines=()
 
 	if [[ -z "$curl_bin" ]]; then
@@ -411,8 +414,151 @@ download_marketplace_vsix() {
 		-H 'X-Market-Client-Id: VSCode 1.0' \
 		--data "$payload" \
 		'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery')"
-	parse_script=$'import json\nimport pathlib\nimport sys\nimport urllib.request\n\nextension_id = sys.argv[1]\ndownload_root = pathlib.Path(sys.argv[2]).expanduser()\ntarget_code_version = sys.argv[3]\nbody = json.load(sys.stdin)\n\ndef parse_version(text):\n    text = str(text).strip().lstrip("v")\n    parts = []\n    for raw in text.split("."):\n        digits = "".join(ch for ch in raw if ch.isdigit())\n        parts.append(int(digits or "0"))\n    while len(parts) < 3:\n        parts.append(0)\n    return tuple(parts[:3])\n\ndef upper_for_caret(base):\n    if base[0] != 0:\n        return (base[0] + 1, 0, 0)\n    if base[1] != 0:\n        return (0, base[1] + 1, 0)\n    return (0, 0, base[2] + 1)\n\ndef upper_for_tilde(base):\n    return (base[0], base[1] + 1, 0)\n\ndef wildcard_range(token):\n    token = token.strip()\n    if token in {"*", "x", "X"}:\n        return (0, 0, 0), None\n    parts = token.split(".")\n    normalized = []\n    wildcard_index = None\n    for index, part in enumerate(parts):\n        if part in {"*", "x", "X"}:\n            wildcard_index = index\n            break\n        normalized.append(int("".join(ch for ch in part if ch.isdigit()) or "0"))\n    if wildcard_index is None:\n        return None\n    while len(normalized) < 3:\n        normalized.append(0)\n    lower = tuple(normalized[:3])\n    if wildcard_index == 0:\n        upper = None\n    elif wildcard_index == 1:\n        upper = (lower[0] + 1, 0, 0)\n    else:\n        upper = (lower[0], lower[1] + 1, 0)\n    return lower, upper\n\ndef satisfies_token(token, target):\n    token = token.strip()\n    if not token or token in {"*", "x", "X"}:\n        return True\n    if token.startswith("^"):\n        base = parse_version(token[1:])\n        return base <= target < upper_for_caret(base)\n    if token.startswith("~"):\n        base = parse_version(token[1:])\n        return base <= target < upper_for_tilde(base)\n    for prefix in (">=", "<=", ">", "<", "="):\n        if token.startswith(prefix):\n            version = parse_version(token[len(prefix):])\n            if prefix == ">=":\n                return target >= version\n            if prefix == "<=":\n                return target <= version\n            if prefix == ">":\n                return target > version\n            if prefix == "<":\n                return target < version\n            return target == version\n    wildcard = wildcard_range(token)\n    if wildcard is not None:\n        lower, upper = wildcard\n        if upper is None:\n            return True\n        return lower <= target < upper\n    return target == parse_version(token)\n\ndef is_compatible(spec, target):\n    for group in str(spec).split("||"):\n        tokens = [token for token in group.replace(",", " ").split() if token]\n        if all(satisfies_token(token, target) for token in tokens):\n            return True\n    return False\n\ntarget = parse_version(target_code_version)\nresults = body.get("results") or []\nextensions = results[0].get("extensions") if results else []\nif not extensions:\n    print(f"error: extension not found in marketplace: {extension_id}", file=sys.stderr)\n    sys.exit(1)\n\nextension = extensions[0]\nversions = extension.get("versions") or []\nif not versions:\n    print(f"error: extension has no versions in marketplace: {extension_id}", file=sys.stderr)\n    sys.exit(1)\n\npublisher = str(extension.get("publisher", {}).get("publisherName") or extension_id.split(".", 1)[0]).lower()\nname = str(extension.get("extensionName") or extension_id.split(".", 1)[1]).lower()\n\nfor version_entry in versions:\n    version = str(version_entry.get("version", "")).strip()\n    if not version:\n        continue\n    files = version_entry.get("files") or []\n    manifest_url = ""\n    asset_url = ""\n    for asset in files:\n        asset_type = asset.get("assetType")\n        source = str(asset.get("source", "")).strip()\n        if asset_type == "Microsoft.VisualStudio.Code.Manifest":\n            manifest_url = source\n        elif asset_type == "Microsoft.VisualStudio.Services.VSIXPackage":\n            asset_url = source\n    if not manifest_url or not asset_url:\n        continue\n    with urllib.request.urlopen(manifest_url, timeout=60) as response:\n        manifest = json.load(response)\n    engine_spec = str(manifest.get("engines", {}).get("vscode", "")).strip()\n    if not engine_spec:\n        continue\n    if not is_compatible(engine_spec, target):\n        continue\n    target_path = download_root / f"{publisher}.{name}-{version}.vsix"\n    print(version)\n    print(asset_url)\n    print(target_path)\n    print(engine_spec)\n    break\nelse:\n    print(f"error: no compatible marketplace version found for {extension_id} and Code {target_code_version}", file=sys.stderr)\n    sys.exit(1)\n'
-	result="$(printf '%s' "$metadata_json" | "$python_bin" -c "$parse_script" "$extension_id" "$download_target_root" "$target_code_version")"
+	result="$(VSCODIUM_INSTALLER_MARKETPLACE_JSON="$metadata_json" \
+		"$python_bin" - "$extension_id" "$download_target_root" "$target_code_version" <<'PY'
+import json
+import os
+import pathlib
+import sys
+import urllib.request
+
+extension_id = sys.argv[1]
+download_root = pathlib.Path(sys.argv[2]).expanduser()
+target_code_version = sys.argv[3]
+body = json.loads(os.environ['VSCODIUM_INSTALLER_MARKETPLACE_JSON'])
+
+def parse_version(text):
+    text = str(text).strip().lstrip('v')
+    parts = []
+    for raw in text.split('.'):
+        digits = ''.join(ch for ch in raw if ch.isdigit())
+        parts.append(int(digits or '0'))
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+def upper_for_caret(base):
+    if base[0] != 0:
+        return (base[0] + 1, 0, 0)
+    if base[1] != 0:
+        return (0, base[1] + 1, 0)
+    return (0, 0, base[2] + 1)
+
+def upper_for_tilde(base):
+    return (base[0], base[1] + 1, 0)
+
+def wildcard_range(token):
+    token = token.strip()
+    if token in {'*', 'x', 'X'}:
+        return (0, 0, 0), None
+    parts = token.split('.')
+    normalized = []
+    wildcard_index = None
+    for index, part in enumerate(parts):
+        if part in {'*', 'x', 'X'}:
+            wildcard_index = index
+            break
+        normalized.append(int(''.join(ch for ch in part if ch.isdigit()) or '0'))
+    if wildcard_index is None:
+        return None
+    while len(normalized) < 3:
+        normalized.append(0)
+    lower = tuple(normalized[:3])
+    if wildcard_index == 0:
+        upper = None
+    elif wildcard_index == 1:
+        upper = (lower[0] + 1, 0, 0)
+    else:
+        upper = (lower[0], lower[1] + 1, 0)
+    return lower, upper
+
+def satisfies_token(token, target):
+    token = token.strip()
+    if not token or token in {'*', 'x', 'X'}:
+        return True
+    if token.startswith('^'):
+        base = parse_version(token[1:])
+        return base <= target < upper_for_caret(base)
+    if token.startswith('~'):
+        base = parse_version(token[1:])
+        return base <= target < upper_for_tilde(base)
+    for prefix in ('>=', '<=', '>', '<', '='):
+        if token.startswith(prefix):
+            version = parse_version(token[len(prefix):])
+            if prefix == '>=':
+                return target >= version
+            if prefix == '<=':
+                return target <= version
+            if prefix == '>':
+                return target > version
+            if prefix == '<':
+                return target < version
+            return target == version
+    wildcard = wildcard_range(token)
+    if wildcard is not None:
+        lower, upper = wildcard
+        if upper is None:
+            return True
+        return lower <= target < upper
+    return target == parse_version(token)
+
+def is_compatible(spec, target):
+    for group in str(spec).split('||'):
+        tokens = [token for token in group.replace(',', ' ').split() if token]
+        if all(satisfies_token(token, target) for token in tokens):
+            return True
+    return False
+
+target = parse_version(target_code_version)
+results = body.get('results') or []
+extensions = results[0].get('extensions') if results else []
+if not extensions:
+    print(f'error: extension not found in marketplace: {extension_id}', file=sys.stderr)
+    sys.exit(1)
+
+extension = extensions[0]
+versions = extension.get('versions') or []
+if not versions:
+    print(f'error: extension has no versions in marketplace: {extension_id}', file=sys.stderr)
+    sys.exit(1)
+
+publisher = str(extension.get('publisher', {}).get('publisherName') or extension_id.split('.', 1)[0]).lower()
+name = str(extension.get('extensionName') or extension_id.split('.', 1)[1]).lower()
+
+for version_entry in versions:
+    version = str(version_entry.get('version', '')).strip()
+    if not version:
+        continue
+    files = version_entry.get('files') or []
+    manifest_url = ''
+    asset_url = ''
+    for asset in files:
+        asset_type = asset.get('assetType')
+        source = str(asset.get('source', '')).strip()
+        if asset_type == 'Microsoft.VisualStudio.Code.Manifest':
+            manifest_url = source
+        elif asset_type == 'Microsoft.VisualStudio.Services.VSIXPackage':
+            asset_url = source
+    if not manifest_url or not asset_url:
+        continue
+    with urllib.request.urlopen(manifest_url, timeout=60) as response:
+        manifest = json.load(response)
+    engine_spec = str(manifest.get('engines', {}).get('vscode', '')).strip()
+    if not engine_spec:
+        continue
+    if not is_compatible(engine_spec, target):
+        continue
+    target_path = download_root / f'{publisher}.{name}-{version}.vsix'
+    print(version)
+    print(asset_url)
+    print(target_path)
+    print(engine_spec)
+    break
+else:
+    print(f'error: no compatible marketplace version found for {extension_id} and Code {target_code_version}', file=sys.stderr)
+    sys.exit(1)
+PY
+)"
 	mapfile -t result_lines <<<"$result"
 	version="${result_lines[0]:-}"
 	asset_url="${result_lines[1]:-}"

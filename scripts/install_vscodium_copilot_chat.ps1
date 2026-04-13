@@ -24,6 +24,7 @@ $RepoDir = Split-Path -Parent $ScriptDir
 $script:DownloadRoot = $null
 $script:CreatedDownloadRoot = $false
 $script:ResolvedCodeVersion = $null
+# SYNC: keep in sync with required_proposals in install_vscodium_copilot_chat.sh and the required sets in validate-installers.yml
 $script:RequiredProposals = @(
 	'chatDebug',
 	'chatHooks',
@@ -66,10 +67,10 @@ When no local VSIX is found, the installer downloads the newest marketplace buil
 
 Common options:
   -ChatVsix PATH
-	-WithCopilot
+  -WithCopilot
   -CopilotVsix PATH
-	-CodeVersion VER
-	-DownloadLatest
+  -CodeVersion VER
+  -DownloadLatest
   -UserDataDir PATH
   -ExtensionsDir PATH
   -SkipInstall
