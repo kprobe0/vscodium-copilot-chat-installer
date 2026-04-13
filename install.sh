@@ -50,7 +50,7 @@ run_installer() {
 	if [[ $# -eq 0 ]]; then
 		if [[ -t 0 ]]; then
 			bash "$installer_path"
-			return $?
+			return
 		fi
 
 		if exec {tty_fd}</dev/tty 2>/dev/null; then

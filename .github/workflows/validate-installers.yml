@@ -18,6 +18,9 @@ on:
       - .github/workflows/validate-installers.yml
       - README.md
 
+env:
+  TARGET_CODE_VERSION: '1.112.01907'
+
 jobs:
   validate-bash-installer:
     runs-on: ubuntu-latest
@@ -25,16 +28,46 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify proposals lists are in sync
+        run: |
+          python3 - scripts/install_vscodium_copilot_chat.sh scripts/install_vscodium_copilot_chat.ps1 <<'PY'
+          import re, sys, pathlib
+
+          bash_src = pathlib.Path(sys.argv[1]).read_text()
+          ps1_src  = pathlib.Path(sys.argv[2]).read_text()
+
+          bash_start = bash_src.index('required_proposals=(')
+          bash_end   = bash_src.index(')', bash_start)
+          bash_block = bash_src[bash_start:bash_end]
+
+          ps1_start  = ps1_src.index('$script:RequiredProposals = @(')
+          ps1_end    = ps1_src.index(')', ps1_start)
+          ps1_block  = ps1_src[ps1_start:ps1_end]
+
+          bash_proposals = sorted(re.findall(r'^\s+(\w+)\s*$', bash_block, re.MULTILINE))
+          ps1_proposals  = sorted(re.findall(r"'(\w+)'", ps1_block))
+
+          if bash_proposals != ps1_proposals:
+              print(f'MISMATCH\n  bash: {bash_proposals}\n  ps1:  {ps1_proposals}', file=sys.stderr)
+              sys.exit(1)
+          print(f'OK: {len(bash_proposals)} proposals match across both installers')
+          PY
+
       - name: Syntax check Bash entrypoints
         run: |
           bash -n install.sh
           bash -n scripts/install_vscodium_copilot_chat.sh
 
+      - name: ShellCheck
+        run: |
+          sudo apt-get install -y shellcheck
+          shellcheck --severity=warning install.sh scripts/install_vscodium_copilot_chat.sh
+
       - name: Run Bash installer against temp directories
         run: |
           USER_DATA_DIR="$RUNNER_TEMP/vscodium-user-data"
           EXTENSIONS_DIR="$RUNNER_TEMP/vscodium-extensions"
-          TARGET_CODE_VERSION="1.112.01907"
+          TARGET_CODE_VERSION="${{ env.TARGET_CODE_VERSION }}"
           export VSCODIUM_CODE_VERSION="$TARGET_CODE_VERSION"
           chmod +x install.sh scripts/install_vscodium_copilot_chat.sh
           ./install.sh \
@@ -47,7 +80,7 @@ jobs:
         run: |
           USER_DATA_DIR="$RUNNER_TEMP/vscodium-user-data"
           EXTENSIONS_DIR="$RUNNER_TEMP/vscodium-extensions"
-          TARGET_CODE_VERSION="1.112.01907"
+          TARGET_CODE_VERSION="${{ env.TARGET_CODE_VERSION }}"
           export USER_DATA_DIR EXTENSIONS_DIR TARGET_CODE_VERSION
           python3 - <<'PY'
           import json
@@ -137,6 +170,7 @@ jobs:
                 return True
             return False
 
+          # SYNC: keep in sync with required_proposals in install_vscodium_copilot_chat.sh and $script:RequiredProposals in install_vscodium_copilot_chat.ps1
           required = {
               'chatDebug',
               'chatHooks',
@@ -230,7 +264,7 @@ jobs:
         run: |
           $env:USER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumUserData'
           $env:EXTENSIONS_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumExtensions'
-          $env:TARGET_CODE_VERSION = '1.112.01907'
+          $env:TARGET_CODE_VERSION = '${{ env.TARGET_CODE_VERSION }}'
           $env:VSCODIUM_CODE_VERSION = $env:TARGET_CODE_VERSION
           $installerArgs = @{
             DownloadLatest = $true
@@ -244,7 +278,7 @@ jobs:
         run: |
           $env:USER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumUserData'
           $env:EXTENSIONS_DIR = Join-Path $env:RUNNER_TEMP 'VSCodiumExtensions'
-          $env:TARGET_CODE_VERSION = '1.112.01907'
+          $env:TARGET_CODE_VERSION = '${{ env.TARGET_CODE_VERSION }}'
 
           function ConvertTo-NormalizedVersion {
             param([string]$Text)
@@ -378,6 +412,7 @@ jobs:
             return $false
           }
 
+          # SYNC: keep in sync with required_proposals in install_vscodium_copilot_chat.sh and $script:RequiredProposals in install_vscodium_copilot_chat.ps1
           $required = @(
             'chatDebug',
             'chatHooks',
