@@ -397,7 +397,7 @@ ensure_download_root() {
 download_marketplace_vsix() {
 	local extension_id="$1"
 	local result_var_name="$2"
-	local download_target_root payload metadata_json result version asset_url target_path engine_spec target_code_version
+	local download_target_root payload metadata_json result version asset_url target_path engine_spec target_code_version json_tmpfile
 	local -a result_lines=()
 
 	if [[ -z "$curl_bin" ]]; then
@@ -414,10 +414,12 @@ download_marketplace_vsix() {
 		-H 'X-Market-Client-Id: VSCode 1.0' \
 		--data "$payload" \
 		'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery')"
-	result="$(VSCODIUM_INSTALLER_MARKETPLACE_JSON="$metadata_json" \
-		"$python_bin" - "$extension_id" "$download_target_root" "$target_code_version" <<'PY'
+	json_tmpfile="$(mktemp)"
+	# shellcheck disable=SC2064
+	trap "rm -f '$json_tmpfile'" RETURN
+	printf '%s' "$metadata_json" > "$json_tmpfile"
+	result="$("$python_bin" - "$extension_id" "$download_target_root" "$target_code_version" "$json_tmpfile" <<'PY'
 import json
-import os
 import pathlib
 import sys
 import urllib.request
@@ -425,7 +427,7 @@ import urllib.request
 extension_id = sys.argv[1]
 download_root = pathlib.Path(sys.argv[2]).expanduser()
 target_code_version = sys.argv[3]
-body = json.loads(os.environ['VSCODIUM_INSTALLER_MARKETPLACE_JSON'])
+body = json.loads(pathlib.Path(sys.argv[4]).read_text(encoding='utf-8'))
 
 def parse_version(text):
     text = str(text).strip().lstrip('v')
