@@ -397,7 +397,7 @@ ensure_download_root() {
 download_marketplace_vsix() {
 	local extension_id="$1"
 	local result_var_name="$2"
-	local download_target_root payload metadata_json result version asset_url target_path engine_spec target_code_version json_tmpfile
+	local download_target_root payload metadata_json result version asset_url target_path engine_spec target_code_version
 	local -a result_lines=()
 
 	if [[ -z "$curl_bin" ]]; then
@@ -414,11 +414,8 @@ download_marketplace_vsix() {
 		-H 'X-Market-Client-Id: VSCode 1.0' \
 		--data "$payload" \
 		'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery')"
-	json_tmpfile="$(mktemp)"
-	# shellcheck disable=SC2064
-	trap "rm -f '$json_tmpfile'" RETURN
-	printf '%s' "$metadata_json" > "$json_tmpfile"
-	result="$("$python_bin" - "$extension_id" "$download_target_root" "$target_code_version" "$json_tmpfile" <<'PY'
+	printf '%s' "$metadata_json" > "$download_root/marketplace-query.json"
+	result="$("$python_bin" - "$extension_id" "$download_target_root" "$target_code_version" "$download_root/marketplace-query.json" <<'PY'
 import json
 import pathlib
 import sys
